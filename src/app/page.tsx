@@ -3,11 +3,46 @@
 import { useEffect, useState } from "react";
 import { PublicationGrid } from "@/components/Misc/PublicationGrid";
 import Image from "next/image";
+import { encodeDeepLinkLocator } from "@/helpers/deepLinkLocator";
 
 import { isManifestRouteEnabled } from "./ManifestRouteEnabled";
 
 import "./reset.css";
 import "./home.css";
+
+const childrenLiteratureManifestUrl = "https%3A%2F%2Fpublication-server.readium.org%2Fwebpub%2FaHR0cHM6Ly9naXRodWIuY29tL0lEUEYvZXB1YjMtc2FtcGxlcy9yZWxlYXNlcy9kb3dubG9hZC8yMDIzMDcwNC9jaGlsZHJlbnMtbGl0ZXJhdHVyZS5lcHVi%2Fmanifest.json";
+
+const childrenLiteratureSampleLocator = {
+  href: "EPUB/s04.xhtml",
+  type: "application/xhtml+xml",
+  locations: {
+    progression: 0.75
+  },
+  text: {
+    before: "Great was the alarm in the palace of",
+    highlight: "Rome",
+    after: ", which soon spread throughout the entire city."
+  }
+};
+
+const childrenLiteratureSampleLocatorParam = encodeDeepLinkLocator(childrenLiteratureSampleLocator);
+
+const warConquestManifestUrl = encodeURIComponent("http://localhost:15080/OTc4MTQ3OTgxOTQ5Mi5lcHVi/manifest.json");
+
+const warConquestSampleLocator = {
+  href: "ops/xhtml/chapter1.xhtml",
+  type: "application/xhtml+xml",
+  locations: {
+    progression: 0.75
+  },
+  text: {
+    after: "for example, wondered about a Jewish defense lawyer she observed",
+    before: "A newspaper correspondent from",
+    highlight: "Berlin"
+  }
+};
+
+const warConquestSampleLocatorParam = encodeDeepLinkLocator(warConquestSampleLocator);
 
 const books = [
   {
@@ -90,8 +125,15 @@ const onlineBooks = [
     title: "Children Literature",
     author: "Charles Madison Curry, Erle Elsworth Clippinger",
     cover: "/images/ChildrensLiterature.png",
-    url: "/read/manifest/https%3A%2F%2Fpublication-server.readium.org%2Fwebpub%2FaHR0cHM6Ly9naXRodWIuY29tL0lEUEYvZXB1YjMtc2FtcGxlcy9yZWxlYXNlcy9kb3dubG9hZC8yMDIzMDcwNC9jaGlsZHJlbnMtbGl0ZXJhdHVyZS5lcHVi%2Fmanifest.json",
+    url: `/read/manifest/${ childrenLiteratureManifestUrl }?locator=${ childrenLiteratureSampleLocatorParam }`,
     rendition: "Reflowable EPUB"
+  },
+  {
+    title: "War Conquest and Catastrophe",
+    author: "NYU Press",
+    cover: "/images/ChildrensLiterature.png",
+    url: `/read/manifest/${ warConquestManifestUrl }?locator=${ warConquestSampleLocatorParam }&search=Berlin`,
+    rendition: "Deep Link Test"
   }
 ];
 

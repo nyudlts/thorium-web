@@ -28,7 +28,10 @@ import { NavigatorProvider } from "@/core/Navigator";
 import {
   BasicTextSelection,
   ContextMenuEvent,
+  DecoratorRequest,
   FrameClickEvent,
+  Layout as DecorationLayout,
+  Width as DecorationWidth,
   SuspiciousActivityEvent
 } from "@readium/navigator-html-injectables";
 import { EpubNavigatorListeners, KeyboardPeripheralEventData } from "@readium/navigator";
@@ -107,7 +110,8 @@ export const StatefulReader = ({
   localDataKey,
   plugins,
   positionStorage,
-  containerRefSetter
+  containerRefSetter,
+  deepLinkLocator
 }: StatefulReaderProps) => {
   const [pluginsRegistered, setPluginsRegistered] = useState(false);
   useLayoutEffect(() => {
@@ -128,13 +132,19 @@ export const StatefulReader = ({
   return (
     <>
       <ThPluginProvider>
-        <StatefulReaderInner publication={ publication } localDataKey={ localDataKey } positionStorage={ positionStorage } containerRefSetter={ containerRefSetter } />
+        <StatefulReaderInner
+          publication={ publication }
+          localDataKey={ localDataKey }
+          positionStorage={ positionStorage }
+          containerRefSetter={ containerRefSetter }
+          deepLinkLocator={ deepLinkLocator }
+        />
       </ThPluginProvider>
     </>
   );
 };
 
-const StatefulReaderInner = ({ publication, localDataKey, positionStorage, containerRefSetter }: { publication: Publication; localDataKey: string | null; positionStorage?: PositionStorage; containerRefSetter?: (el: Element | null) => void }) => {
+const StatefulReaderInner = ({ publication, localDataKey, positionStorage, containerRefSetter, deepLinkLocator }: { publication: Publication; localDataKey: string | null; positionStorage?: PositionStorage; containerRefSetter?: (el: Element | null) => void; deepLinkLocator?: Locator }) => {
   const { fxlActionKeys, fxlThemeKeys, reflowActionKeys, reflowThemeKeys } = useFilteredPreferenceKeys();
   const { preferences, getFontMetadata, getFontInjectables } = usePreferences();
   const { direction: uiDirection } = useLocale();
@@ -145,6 +155,8 @@ const StatefulReaderInner = ({ publication, localDataKey, positionStorage, conta
   
   const container = useRef<HTMLDivElement>(null);
   const arrowsWidth = useRef(2 * ((preferences.theming.arrow.size || 40) + (preferences.theming.arrow.offset || 0)));
+  const deepLinkHandled = useRef(false);
+  const [initialNavigatorSettled, setInitialNavigatorSettled] = useState(false);
 
   const profile = useAppSelector(state => state.reader.profile);
   const isFXL = useAppSelector(state => state.publication.isFXL);
@@ -244,7 +256,9 @@ const StatefulReaderInner = ({ publication, localDataKey, positionStorage, conta
     goRight,
     goBackward,
     goForward,
+    go,
     navLayout,
+    currentLocator,
     currentPositions,
     canGoBackward,
     canGoForward,
@@ -254,6 +268,99 @@ const StatefulReaderInner = ({ publication, localDataKey, positionStorage, conta
     submitPreferences,
     timeline: getNavigatorTimeline
   } = epubNavigator;
+
+  const getDeepLinkFrameState = useCallback(() => {
+    const frames = getCframes();
+
+    return {
+      count: frames?.length ?? 0,
+      frames: frames?.map((frame, index) => {
+        let href: string | undefined;
+
+        try {
+          href = frame?.window?.location?.href;
+        } catch {
+          href = undefined;
+        }
+
+        return {
+          index,
+          hasFrame: !!frame,
+          hasWindow: !!frame?.window,
+          hasMessenger: !!frame?.msg,
+          source: frame?.source,
+          href
+        };
+      }) ?? []
+    };
+  }, [getCframes]);
+
+  const waitForDeepLinkFrames = useCallback((phase: string, attempts = 10, delay = 75) => {
+    return new Promise<boolean>((resolve) => {
+      let attempt = 0;
+
+      const checkFrames = () => {
+        const frameState = getDeepLinkFrameState();
+        const hasMessenger = frameState.frames.some(frame => frame.hasMessenger);
+
+        console.debug("[deep-link]", phase, {
+          attempt,
+          hasMessenger,
+          frameState
+        });
+
+        if (hasMessenger) {
+          resolve(true);
+          return;
+        }
+
+        attempt += 1;
+        if (attempt >= attempts) {
+          resolve(false);
+          return;
+        }
+
+        window.setTimeout(checkFrames, delay);
+      };
+
+      checkFrames();
+    });
+  }, [getDeepLinkFrameState]);
+
+  const highlightDeepLinkLocator = useCallback((locator: Locator) => {
+    const frames = getCframes();
+    if (!frames) {
+      console.warn("[deep-link] highlight skipped: no frames", {
+        locator,
+        frameState: getDeepLinkFrameState()
+      });
+      return;
+    }
+
+    frames.forEach((frame) => {
+      if (!frame?.msg) {
+        console.warn("[deep-link] highlight skipped for frame without messenger", {
+          locator,
+          frameState: getDeepLinkFrameState()
+        });
+        return;
+      }
+
+      frame?.msg?.send("decorate", {
+        group: "nyu-search",
+        action: "update",
+        decoration: {
+          id: "nyu-search",
+          locator,
+          style: {
+            tint: "#ffff00",
+            layout: DecorationLayout.Boxes,
+            width: DecorationWidth.Wrap
+          }
+        }
+      } satisfies DecoratorRequest);
+    });
+  }, [getCframes, getDeepLinkFrameState]);
 
   const { setLocalData, getLocalData, localData } = usePositionStorage(localDataKey, positionStorage);
 
@@ -571,9 +678,128 @@ const StatefulReaderInner = ({ publication, localDataKey, positionStorage, conta
   useLayoutEffect(() => {
     if (!navigatorReady) return;
 
+    let cancelled = false;
+    let frameId: number | undefined;
+    let timeoutId: number | undefined;
+
+    setInitialNavigatorSettled(false);
+
     applyConstraint(arrowsOccupySpace ? arrowsWidth.current : 0)
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => {
+        frameId = window.requestAnimationFrame(() => {
+          timeoutId = window.setTimeout(() => {
+            if (!cancelled) setInitialNavigatorSettled(true);
+          }, 100);
+        });
+      });
+
+    return () => {
+      cancelled = true;
+      if (frameId !== undefined) window.cancelAnimationFrame(frameId);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
   }, [arrowsOccupySpace, applyConstraint, navigatorReady]);
+
+  useEffect(() => {
+    if (!navigatorReady || !initialNavigatorSettled || !deepLinkLocator || deepLinkHandled.current) return;
+
+    let cancelled = false;
+    deepLinkHandled.current = true;
+    const deepLinkHref = deepLinkLocator.href.split("#")[0];
+    const matchingPosition = positionsList.find(position => position.href === deepLinkHref);
+
+    if (!matchingPosition) {
+      console.error("[deep-link] navigation skipped: no matching position for locator href", {
+        locator: deepLinkLocator,
+        href: deepLinkHref,
+        positionsCount: positionsList.length,
+        availableHrefs: Array.from(new Set(positionsList.map(position => position.href))).slice(0, 20)
+      });
+      return;
+    }
+
+    const logRuntimeError = (label: string, error: unknown) => {
+      console.error("[deep-link]", label, {
+        error,
+        locator: deepLinkLocator,
+        currentLocator: currentLocator(),
+        currentPositions: currentPositions(),
+        frameState: getDeepLinkFrameState()
+      });
+    };
+
+    const handleWindowError = (event: ErrorEvent) => {
+      logRuntimeError("window error during deep-link handling", event.error ?? event.message);
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      logRuntimeError("unhandled rejection during deep-link handling", event.reason);
+    };
+
+    window.addEventListener("error", handleWindowError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+
+    console.info("[deep-link] navigator ready; preparing navigation", {
+      locator: deepLinkLocator,
+      currentLocator: currentLocator(),
+      currentPositions: currentPositions(),
+      navLayout: navLayout(),
+      frameState: getDeepLinkFrameState()
+    });
+
+    waitForDeepLinkFrames("before go")
+      .then((framesReady) => {
+        if (cancelled) return;
+
+        if (!framesReady) {
+          console.warn("[deep-link] proceeding to go without ready frames", {
+            locator: deepLinkLocator,
+            frameState: getDeepLinkFrameState()
+          });
+        }
+
+        try {
+          go(deepLinkLocator, !reducedMotion, (ok) => {
+            console.info("[deep-link] go callback", {
+              ok,
+              locator: deepLinkLocator,
+              currentLocator: currentLocator(),
+              currentPositions: currentPositions(),
+              frameState: getDeepLinkFrameState()
+            });
+
+            if (!ok || cancelled) return;
+
+            waitForDeepLinkFrames("before highlight", 12, 75)
+              .then((highlightFramesReady) => {
+                if (cancelled) return;
+
+                if (!highlightFramesReady) {
+                  console.warn("[deep-link] highlighting without ready frames", {
+                    locator: deepLinkLocator,
+                    frameState: getDeepLinkFrameState()
+                  });
+                }
+
+                highlightDeepLinkLocator(deepLinkLocator);
+              });
+          });
+        } catch (error) {
+          console.error("[deep-link] go threw synchronously", {
+            error,
+            locator: deepLinkLocator,
+            frameState: getDeepLinkFrameState()
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("error", handleWindowError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+    };
+  }, [currentLocator, currentPositions, deepLinkLocator, getDeepLinkFrameState, go, highlightDeepLinkLocator, initialNavigatorSettled, navLayout, navigatorReady, positionsList, reducedMotion, waitForDeepLinkFrames]);
 
   // Theme can also change on colorScheme change so
   // we have to handle this side-effect but we can’t

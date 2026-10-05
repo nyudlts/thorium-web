@@ -48,6 +48,7 @@ export interface StatefulReaderProps {
   plugins?: ThPlugin[];
   positionStorage?: PositionStorage;
   containerRefSetter?: (el: Element | null) => void;
+  deepLinkLocator?: Locator;
 }
 
 export type ThPluginFactory = () => ThPlugin[] | Promise<ThPlugin[]>;
@@ -68,6 +69,7 @@ export interface ReaderComponentProps<
   isLoading?: boolean;
   positionStorage?: PositionStorage;
   plugins?: ReaderPlugins;
+  deepLinkLocator?: Locator;
   i18n?: Partial<InitOptions>;
   preferences?: P extends "audio"
     ? { initialPreferences?: ThAudioPreferences<K>; adapter?: ThAudioPreferencesAdapter<K> }
@@ -188,10 +190,11 @@ interface ReaderContentProps {
   localDataKey: string | null;
   positionStorage?: PositionStorage;
   plugins?: ThPlugin[];
+  deepLinkLocator?: Locator;
   coverUrl?: string;
 }
 
-const StatefulReaderContent = ({ profile, publication, plugins, coverUrl, ...props }: ReaderContentProps) => {
+const StatefulReaderContent = ({ profile, publication, plugins, coverUrl, deepLinkLocator, ...props }: ReaderContentProps) => {
   const { preferences, resolveFontLanguage } = usePreferences();
   const themeObject = useAppSelector(state => state.theming.theme);
   const isFXL = useAppSelector(state => state.publication.isFXL);
@@ -235,7 +238,7 @@ const StatefulReaderContent = ({ profile, publication, plugins, coverUrl, ...pro
 
   switch (profile) {
     case "epub":
-      return <Suspense><StatefulEpubReader publication={ publication } { ...props } plugins={ plugins } containerRefSetter={ setContainerRef } /></Suspense>;
+      return <Suspense><StatefulEpubReader publication={ publication } { ...props } plugins={ plugins } containerRefSetter={ setContainerRef } deepLinkLocator={ deepLinkLocator } /></Suspense>;
     case "webPub":
     default:
       return <Suspense><StatefulWebPubReader publication={ publication } { ...props } plugins={ plugins } containerRefSetter={ setContainerRef } /></Suspense>;

@@ -7,17 +7,21 @@ import { useAppSelector } from "@/lib/hooks";
 import { verifyManifestUrl } from "@/app/api/verify-manifest/verifyDomain";
 import { StatefulReaderWrapper } from "@/components/Reader/StatefulReaderWrapper";
 import { ErrorHandler, ProcessedError } from "@/helpers/errorHandler";
+import { parseDeepLinkLocator, QueryParamValue } from "@/helpers/deepLinkLocator";
 
 type Params = { manifest: string };
+type SearchParams = { [key: string]: QueryParamValue };
 
 type Props = {
   params: Promise<Params>;
+  searchParams: Promise<SearchParams>;
 };
 
-export default function ManifestPage({ params }: Props) {
+export default function ManifestPage({ params, searchParams }: Props) {
   const [domainError, setDomainError] = useState<ProcessedError | null>(null);
   const isLoading = useAppSelector(state => state.reader.isLoading);
   const manifestUrl = use(params).manifest;
+  const deepLinkLocator = parseDeepLinkLocator(use(searchParams).locator);
 
   useEffect(() => {
     if (manifestUrl) {
@@ -64,6 +68,7 @@ export default function ManifestPage({ params }: Props) {
           publication={ publication }
           localDataKey={ localDataKey }
           isLoading={ isLoading || publicationLoading }
+          deepLinkLocator={ deepLinkLocator }
         />
       ) : null }
     </>
